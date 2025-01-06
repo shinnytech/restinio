@@ -319,10 +319,30 @@ prepare_connection_and_start_read(
 	start_read_cb();
 }
 
+template < typename Connection, typename Start_Read_CB, typename Failed_CB >
+void
+prepare_connection_and_start_read(
+	asio_ns::local::stream_protocol::socket & ,
+	Connection & ,
+	Start_Read_CB start_read_cb,
+	Failed_CB )
+{
+	// No preparation is needed, start
+	start_read_cb();
+}
+
 // An overload for the case of non-TLS-connection.
 inline tls_socket_t *
 make_tls_socket_pointer_for_state_listener(
 	asio_ns::ip::tcp::socket & ) noexcept
+{
+	return nullptr;
+}
+
+// An overload for Unix domain socket.
+inline tls_socket_t *
+make_tls_socket_pointer_for_state_listener(
+	asio_ns::local::stream_protocol::socket & ) noexcept
 {
 	return nullptr;
 }
@@ -392,13 +412,25 @@ class connection_t final
 			,	m_lifetime_monitor{ std::move(lifetime_monitor) }
 		{
 			// Notify of a new connection instance.
-			m_logger.trace( [&]{
+			if (std::holds_alternative<asio_ns::ip::tcp::endpoint>(m_remote_endpoint)) {
+				auto endpoint = std::get<asio_ns::ip::tcp::endpoint>(m_remote_endpoint);
+				m_logger.trace( [&]{
+						return fmt::format(
+							RESTINIO_FMT_FORMAT_STRING(
+								"[connection:{}] start connection with {}" ),
+							connection_id(),
+							fmtlib_tools::streamed( endpoint ) );
+				} );
+			} else {
+				auto endpoint = std::get<asio_ns::local::stream_protocol::endpoint>(m_remote_endpoint);
+				m_logger.trace( [&]{
 					return fmt::format(
 						RESTINIO_FMT_FORMAT_STRING(
 							"[connection:{}] start connection with {}" ),
 						connection_id(),
-						fmtlib_tools::streamed( m_remote_endpoint ) );
-			} );
+						fmtlib_tools::streamed( endpoint ) );
+				} );
+			}
 		}
 
 		// Disable copy/move.
@@ -1856,10 +1888,10 @@ class connection_factory_t
 		{
 			using connection_type_t = connection_t< Traits >;
 
-			{
-				socket_options_t options{ socket.lowest_layer() };
-				(*m_socket_options_setter)( options );
-			}
+			// {
+			// 	socket_options_t options{ socket.lowest_layer() };
+			// 	(*m_socket_options_setter)( options );
+			// }
 
 			return std::make_shared< connection_type_t >(
 				m_connection_id_counter++,

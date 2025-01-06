@@ -573,10 +573,12 @@ class basic_server_settings_t
 	public:
 		basic_server_settings_t(
 			std::uint16_t port = 8080,
-			asio_ns::ip::tcp protocol = asio_ns::ip::tcp::v4() )
+			asio_ns::ip::tcp protocol = asio_ns::ip::tcp::v4(),
+			std::string unix_socket_path = "/tmp/restinio.sock" )
 			:	base_type_t{}
 			,	m_port{ port }
 			,	m_protocol{ protocol }
+			,	m_unix_socket_path{ std::move( unix_socket_path ) }
 		{}
 
 		//! Server endpoint.
@@ -718,6 +720,44 @@ class basic_server_settings_t
 			return m_address;
 		}
 		//! \}
+
+		/*!
+		* Sets the Unix domain socket path for the server.
+		*
+		* If this is set, the server will listen on a Unix domain socket
+		* instead of a TCP socket. The port and address settings will be ignored.
+		*
+		* Usage example:
+		* @code
+		* using my_server_t = restinio::http_server_t< my_server_traits_t >;
+		* my_server_t server{
+		*   restinio::own_io_context(),
+		*   [](auto & settings) {
+		*     settings.unix_socket_path("/tmp/my_restinio_socket");
+		*     settings.request_handler(...);
+		*     ...
+		*   }
+		* };
+		* @endcode
+		*/
+		Derived& unix_socket_path(std::string path) & {
+			m_unix_socket_path = std::move(path);
+			return reference_to_derived();
+		}
+
+		/*!
+		* Sets the Unix domain socket path for the server (rvalue version).
+		*/
+		Derived&& unix_socket_path(std::string path) && {
+			return std::move(this->unix_socket_path(std::move(path)));
+		}
+
+		/*!
+		* Gets the Unix domain socket path if set.
+		*/
+		[[nodiscard]] const std::string& unix_socket_path() const noexcept {
+			return m_unix_socket_path;
+		}
 
 		//! Size of buffer for io operations.
 		/*!
@@ -1727,6 +1767,7 @@ class basic_server_settings_t
 		 * This member has type address_variant_t since v.0.6.11
 		 */
 		details::address_variant_t m_address;
+		std::string m_unix_socket_path;
 		//! \}
 
 		//! Size of buffer for io operations.

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <cstdint>
+#include <variant>
 
 #include <restinio/asio_include.hpp>
 
@@ -174,7 +175,10 @@ using not_null_pointer_t = T*;
 using connection_id_t = std::uint64_t;
 
 //! An alias for endpoint type from Asio.
-using endpoint_t = asio_ns::ip::tcp::endpoint;
+using tcp_endpoint_t = asio_ns::ip::tcp::endpoint;
+using unix_endpoint_t = asio_ns::local::stream_protocol::endpoint;
+
+using endpoint_t = std::variant<tcp_endpoint_t, unix_endpoint_t>;
 
 } /* namespace restinio */
 

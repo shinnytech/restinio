@@ -194,8 +194,18 @@ class acceptor_t final
 			:	socket_holder_base_t{ settings, io_context }
 			,	ip_blocker_base_t{ settings }
 			,	m_port{ settings.port() }
-			,	m_protocol{ settings.protocol() }
+			,	m_protocol{
+					[&settings]() {
+						if constexpr(std::is_same_v<typename stream_socket_t::protocol_type,
+												asio_ns::local::stream_protocol>) {
+							return typename stream_socket_t::protocol_type{};
+						} else {
+							return settings.protocol();
+						}
+					}()
+				}
 			,	m_address{ settings.address() }
+			,	m_unix_socket_path{settings.unix_socket_path()}
 			,	m_acceptor_options_setter{ settings.acceptor_options_setter() }
 			,	m_acceptor{ io_context }
 			,	m_acceptor_post_bind_hook{ settings.giveaway_acceptor_post_bind_hook() }
@@ -230,33 +240,56 @@ class acceptor_t final
 				return;
 			}
 
-			asio_ns::ip::tcp::endpoint ep{ m_protocol, m_port };
+			typename stream_socket_t::protocol_type::endpoint ep;
 
-			const auto actual_address = try_extract_actual_address_from_variant(
-					m_address );
-			if( actual_address )
-				ep.address( *actual_address );
+			if constexpr(std::is_same_v<typename stream_socket_t::protocol_type, asio_ns::local::stream_protocol>)
+			{
+				// Unix domain socket setup
+				ep = typename stream_socket_t::protocol_type::endpoint(m_unix_socket_path);
+
+				m_logger.trace([&] {
+					return fmt::format(RESTINIO_FMT_FORMAT_STRING("starting server on unix socket {}"),
+									m_unix_socket_path);
+				});
+
+				// Remove existing socket file if it exists
+				if (!m_unix_socket_path.empty())
+				{
+					std::remove(m_unix_socket_path.c_str());
+				}
+
+			}
+			else
+			{
+				// TCP socket setup
+				ep = typename stream_socket_t::protocol_type::endpoint{m_protocol, m_port};
+
+				const auto actual_address =
+					try_extract_actual_address_from_variant(m_address);
+				if (actual_address)
+					ep.address(*actual_address);
+
+				m_logger.trace([&] {
+					return fmt::format(RESTINIO_FMT_FORMAT_STRING("starting server on {}"),
+									fmtlib_tools::streamed(ep));
+				});
+			}
 
 			try
 			{
-				m_logger.trace( [&]{
-					return fmt::format(
-							RESTINIO_FMT_FORMAT_STRING( "starting server on {}" ),
-							fmtlib_tools::streamed( ep ) );
-				} );
 
 				m_acceptor.open( ep.protocol() );
 
-				{
-					// Set acceptor options.
-					acceptor_options_t options{ m_acceptor };
+				// {
+				// 	// Set acceptor options.
+				// 	acceptor_options_t options{ m_acceptor };
 
-					(*m_acceptor_options_setter)( options );
-				}
+				// 	(*m_acceptor_options_setter)( options );
+				// }
 
 				m_acceptor.bind( ep );
 				// Since v.0.6.11 the post-bind hook should be invoked.
-				m_acceptor_post_bind_hook( m_acceptor );
+				// m_acceptor_post_bind_hook( m_acceptor );
 				// server end-point can be replaced if port is allocated by
 				// the operating system (e.g. zero is specified as port number
 				// by a user).
@@ -537,6 +570,11 @@ class acceptor_t final
 		void
 		close_impl()
 		{
+			if (!m_unix_socket_path.empty())
+			{
+				// For Unix domain sockets, remove the socket file
+				std::remove(m_unix_socket_path.c_str());
+			}
 			const auto ep = m_acceptor.local_endpoint();
 
 			// An exception in logger should not prevent a call of close()
@@ -562,14 +600,15 @@ class acceptor_t final
 		//! Server endpoint.
 		//! \{
 		const std::uint16_t m_port;
-		const asio_ns::ip::tcp m_protocol;
+		const typename stream_socket_t::protocol_type m_protocol;
 		const restinio::details::address_variant_t m_address;
+		const std::string m_unix_socket_path;
 		//! \}
 
 		//! Server port listener and connection receiver routine.
 		//! \{
 		std::unique_ptr< acceptor_options_setter_t > m_acceptor_options_setter;
-		asio_ns::ip::tcp::acceptor m_acceptor;
+		typename stream_socket_t::protocol_type::acceptor m_acceptor;
 
 		//! A hook to be called just after a successful call to bind for acceptor.
 		/*!
